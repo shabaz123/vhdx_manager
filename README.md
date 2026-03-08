@@ -17,4 +17,4 @@ You may be requested to elevate to administrator privileges.
 When run, a graphical window appears. It may take a few seconds to display the list of VHDs. Click on the colored bullets to attach or detach any VHD.
 
 
-
+![Example screenshot](example_screenshot.png)
