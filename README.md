@@ -1,10 +1,12 @@
 # VHDX Manager
 
-This Python application for Microsoft Windows can be used to easily attach/detach (i.e. mount/unmount) Virtual Hard Disk (.vhdx) files.
+This Python application for Microsoft Windows can be used to easily attach/detach (i.e. mount/unmount) Virtual Hard Disk (.vhdx) files present in a JSON file called **vhdx_list.json** (if you modify the JSON file manually, restart the app to re-read the file).
 
-All the .vhdx files need to be specified in the vhdx_list.json file.
+You can also create new VHD files by clicking the Create New VHD button in the app, and the app will automatically insert to the vhdx_list.json file.
 
-To use, simply click the colored bullet alongside the desired VHD, to toggle between mounted and unmounted states. It may take a few seconds to perform the action.
+Simply click the colored bullet alongside the desired VHD, to toggle between mounted and unmounted states. It may take a few seconds to perform the action.
+
+![Banner screenshot](banner_screenshot.png)
 
 # Usage
 
