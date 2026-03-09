@@ -16,7 +16,7 @@ The VHD files provide a lot of flexibility. If, say, you have a speedy USB 4 con
 
 # Running VHDX Manager
 
-If you have **git** installed on your Windows PC, then create a folder such as C:\DEV\projects, open a PowerShell window, navigate to that folder, then type the following to download the entire application source to the PC:
+If you have **git** installed on your Windows PC, then create a folder such as **C:\DEV\projects**, open a PowerShell window, navigate to that folder, then type the following to download the entire application source to the PC:
 ```
 git clone https://github.com/shabaz123/vhdx_manager.git
 ```
@@ -36,7 +36,7 @@ The **.\build.bat** command will create a **dist** folder containing **vhdl_mana
 
 ![Shortcut properties](shortcut_properties.png)
 
-When run, a graphical window appears. It may take a few seconds to display the list of VHDs. Click on the colored bullets to attach or detach any VHD.
+When run, a graphical window appears. It may take a few seconds to display the list of VHDs. Click on the colored bullets to attach or detach any VHD. It is suggested to create a folder called C:\LOCAL_VHD for storing your .vhdx files, and a folder called C:\DEV\vhd_mounts where you can create folders that will become the mount points. When you click Create VHD, you will see these example paths, so you do not need to remember them. If you wish to use different paths, you may need to edit the vhdx_manager.py file.
 
 
 ![Example screenshot](example_screenshot.png)
