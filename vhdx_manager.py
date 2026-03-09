@@ -1,19 +1,23 @@
 import ctypes
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import threading
 import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 
 APP_TITLE = "VHDX Manager"
 JSON_FILE = "vhdx_list.json"
 POWERSHELL = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+DEFAULT_VHD_BASE = Path("C:/LOCAL_VHD")
+DEFAULT_MOUNT_BASE = Path("C:/DEV/vhd_mounts")
 
 COLORS = {
     "bg": "#0D1117",
@@ -54,6 +58,7 @@ class VHDManagerApp(tk.Tk):
         self.entries: List[VHDEntry] = []
         self.row_widgets: Dict[str, Dict[str, Any]] = {}
         self.is_busy = False
+        self.create_dialog: Optional[tk.Toplevel] = None
 
         self._build_ui()
         self.refresh_all()
@@ -73,7 +78,7 @@ class VHDManagerApp(tk.Tk):
 
         subtitle = tk.Label(
             header,
-            text="Click a bullet to mount/unmount a VHDX file.",
+            text="Click a bullet to mount, unmount, or detach an unhealthy VHDX.",
             bg=COLORS["bg"],
             fg=COLORS["muted"],
             font=("Segoe UI", 10),
@@ -104,8 +109,28 @@ class VHDManagerApp(tk.Tk):
         )
         self.debug_label.pack(side="left", padx=(16, 0))
 
+        button_bar = tk.Frame(controls, bg=COLORS["bg"])
+        button_bar.pack(side="right")
+
+        self.create_button = tk.Button(
+            button_bar,
+            text="Create New VHDX",
+            command=self.open_create_dialog,
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            activebackground=COLORS["panel_alt"],
+            activeforeground=COLORS["text"],
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=8,
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+        )
+        self.create_button.pack(side="right", padx=(0, 10))
+
         self.refresh_button = tk.Button(
-            controls,
+            button_bar,
             text="Refresh",
             command=self.refresh_all,
             bg=COLORS["panel_alt"],
@@ -171,7 +196,9 @@ class VHDManagerApp(tk.Tk):
 
     def set_busy(self, busy: bool, message: str) -> None:
         self.is_busy = busy
-        self.refresh_button.configure(state=("disabled" if busy else "normal"))
+        state = "disabled" if busy else "normal"
+        self.refresh_button.configure(state=state)
+        self.create_button.configure(state=state)
         self.status_var.set(message)
 
     def set_dbgtext(self, message: str) -> None:
@@ -316,6 +343,265 @@ class VHDManagerApp(tk.Tk):
                 "state_label": state_label,
                 "entry": entry,
             }
+
+    def open_create_dialog(self) -> None:
+        if self.create_dialog is not None and self.create_dialog.winfo_exists():
+            self.create_dialog.lift()
+            self.create_dialog.focus_force()
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Create New VHDX")
+        dialog.configure(bg=COLORS["bg"])
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        self.create_dialog = dialog
+
+        content = tk.Frame(dialog, bg=COLORS["bg"], padx=18, pady=18)
+        content.pack(fill="both", expand=True)
+
+        dialog_vars = {
+            "title": tk.StringVar(value="Bob Application"),
+            "vhd_path": tk.StringVar(value=r"C:\LOCAL_VHD\bob.vhdx"),
+            "volume_label": tk.StringVar(value="BOB_DEV"),
+            "max_size_gb": tk.StringVar(value="30"),
+            "mount_path": tk.StringVar(value=r"C:\DEV\vhd_mounts\bob"),
+            "error_text": tk.StringVar(value=""),
+        }
+        setattr(dialog, "dialog_vars", dialog_vars)
+
+        fields = [
+            ("Title", dialog_vars["title"]),
+            ("VHDX File Path", dialog_vars["vhd_path"]),
+            ("Volume Label", dialog_vars["volume_label"]),
+            ("Max Size [GB]", dialog_vars["max_size_gb"]),
+            ("Dest Mount Path", dialog_vars["mount_path"]),
+        ]
+
+        for row_index, (label_text, var) in enumerate(fields):
+            label = tk.Label(
+                content,
+                text=label_text,
+                bg=COLORS["bg"],
+                fg=COLORS["text"],
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            )
+            label.grid(row=row_index, column=0, sticky="w", pady=(0, 6))
+
+            entry = tk.Entry(
+                content,
+                textvariable=var,
+                bg=COLORS["panel_alt"],
+                fg=COLORS["text"],
+                insertbackground=COLORS["text"],
+                relief="flat",
+                width=48,
+                font=("Segoe UI", 10),
+            )
+            entry.grid(row=row_index, column=1, sticky="ew", padx=(12, 0), pady=(0, 6))
+
+        content.columnconfigure(1, weight=1)
+
+        error_label = tk.Label(
+            content,
+            textvariable=dialog_vars["error_text"],
+            bg=COLORS["bg"],
+            fg=COLORS["Unhealthy"],
+            font=("Segoe UI", 10, "bold"),
+            anchor="w",
+            justify="left",
+            wraplength=520,
+        )
+        error_label.grid(row=len(fields), column=0, columnspan=2, sticky="w", pady=(6, 10))
+
+        button_row = tk.Frame(content, bg=COLORS["bg"])
+        button_row.grid(row=len(fields) + 1, column=0, columnspan=2, sticky="e")
+
+        ok_button = tk.Button(
+            button_row,
+            text="OK",
+            command=lambda: self.submit_create_dialog(dialog),
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            activebackground=COLORS["panel_alt"],
+            activeforeground=COLORS["text"],
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=8,
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+        )
+        ok_button.pack(side="right", padx=(10, 0))
+
+        cancel_button = tk.Button(
+            button_row,
+            text="Cancel",
+            command=lambda: self.close_create_dialog(dialog),
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            activebackground=COLORS["panel_alt"],
+            activeforeground=COLORS["text"],
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=8,
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+        )
+        cancel_button.pack(side="right")
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: self.close_create_dialog(dialog))
+        dialog.bind("<Return>", lambda _event: self.submit_create_dialog(dialog))
+        dialog.bind("<Escape>", lambda _event: self.close_create_dialog(dialog))
+
+    def close_create_dialog(self, dialog: tk.Toplevel) -> None:
+        if dialog.winfo_exists():
+            dialog.grab_release()
+            dialog.destroy()
+        self.create_dialog = None
+
+    def submit_create_dialog(self, dialog: tk.Toplevel) -> None:
+        dialog_vars = getattr(dialog, "dialog_vars")
+        title_text = dialog_vars["title"].get().strip()
+        vhd_path_str = dialog_vars["vhd_path"].get().strip()
+        volume_label = dialog_vars["volume_label"].get().strip()
+        max_size_str = dialog_vars["max_size_gb"].get().strip()
+        mount_path_str = dialog_vars["mount_path"].get().strip()
+
+        if not title_text:
+            dialog_vars["error_text"].set("Error, Title must not be empty")
+            return
+
+        vhd_path = Path(vhd_path_str)
+        mount_path = Path(mount_path_str)
+
+        if not vhd_path.parent.exists() or not mount_path.exists():
+            dialog_vars["error_text"].set("Error, folder does not exist")
+            return
+
+        try:
+            max_size_gb = int(max_size_str)
+        except ValueError:
+            dialog_vars["error_text"].set("Error, Max Size [GB] must be a whole number")
+            return
+
+        if max_size_gb <= 0 or max_size_gb > 200:
+            dialog_vars["error_text"].set("Error, Max Size [GB] must be between 1 and 200")
+            return
+
+        save_ok, save_message = self.validate_json_append(title_text, vhd_path_str, volume_label)
+        if not save_ok:
+            dialog_vars["error_text"].set(save_message)
+            return
+
+        dialog_vars["error_text"].set("")
+        self.set_busy(True, f"Creating {vhd_path.name}...")
+        threading.Thread(
+            target=self._create_vhd_worker,
+            args=(dialog, title_text, vhd_path_str, volume_label, max_size_gb, mount_path_str),
+            daemon=True,
+        ).start()
+
+    def _create_vhd_worker(
+        self,
+        dialog: tk.Toplevel,
+        title_text: str,
+        vhd_path: str,
+        volume_label: str,
+        max_size_gb: int,
+        mount_path: str,
+    ) -> None:
+        success, message = create_dynamic_vhdx_diskpart_safe(
+            vhd_path=vhd_path,
+            volume_label=volume_label,
+            max_size_gb=max_size_gb,
+            mount_folder=mount_path,
+            allowed_vhd_base=str(DEFAULT_VHD_BASE),
+            allowed_mount_base=str(DEFAULT_MOUNT_BASE),
+        )
+
+        if success:
+            save_ok, save_message = self.append_entry_to_json(title_text, vhd_path, volume_label)
+            if not save_ok:
+                self.after(0, lambda: self.set_busy(False, "Create VHDX succeeded, but JSON update failed."))
+                self.after(0, lambda: self._set_dialog_error(dialog, save_message))
+                return
+            self.after(0, lambda: self.close_create_dialog(dialog))
+            self.after(0, lambda: self._finish_create_success(message))
+        else:
+            self.after(0, lambda: self.set_busy(False, "Create VHDX failed."))
+            self.after(0, lambda: self._set_dialog_error(dialog, message))
+
+    def _finish_create_success(self, message: str) -> None:
+        self.set_busy(False, message)
+        self.refresh_all()
+
+    def _set_dialog_error(self, dialog: tk.Toplevel, message: str) -> None:
+        if dialog.winfo_exists():
+            dialog_vars = getattr(dialog, "dialog_vars")
+            dialog_vars["error_text"].set(message)
+            dialog.lift()
+            dialog.focus_force()
+
+    def validate_json_append(self, title_text: str, vhd_path: str, volume_label: str) -> Tuple[bool, str]:
+        if not title_text:
+            return False, "Error, Title must not be empty"
+
+        json_path = Path(JSON_FILE)
+        if not json_path.exists():
+            return False, f"{JSON_FILE} was not found next to the application."
+
+        try:
+            with json_path.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as exc:
+            return False, str(exc)
+
+        if not isinstance(raw, list):
+            return False, f"{JSON_FILE} must contain a JSON array."
+
+        normalized_vhd_path = os.path.normcase(vhd_path)
+        normalized_volume_label = volume_label.strip().lower()
+
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            existing_path = os.path.normcase(str(item.get("vhd_path", "")).strip())
+            existing_label = str(item.get("vhd_volume_label", "")).strip().lower()
+            if existing_path == normalized_vhd_path:
+                return False, f"An entry for this VHDX path already exists in {JSON_FILE}."
+            if existing_label == normalized_volume_label:
+                return False, f"An entry for this volume label already exists in {JSON_FILE}."
+
+        return True, "OK"
+
+    def append_entry_to_json(self, title_text: str, vhd_path: str, volume_label: str) -> Tuple[bool, str]:
+        try:
+            json_path = Path(JSON_FILE)
+            with json_path.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+
+            if not isinstance(raw, list):
+                return False, f"{JSON_FILE} must contain a JSON array."
+
+            raw.append(
+                {
+                    "vhd_path": vhd_path,
+                    "vhd_volume_label": volume_label,
+                    "vhd_description": title_text,
+                }
+            )
+
+            with json_path.open("w", encoding="utf-8") as f:
+                json.dump(raw, f, indent=2)
+                f.write("\n")
+
+            return True, "OK"
+        except Exception as exc:
+            return False, str(exc)
 
     def on_bullet_click(self, vhd_path: str) -> None:
         if self.is_busy:
@@ -467,6 +753,148 @@ $result | ConvertTo-Json -Depth 4
         escaped = ps_quote(vhd_path)
         script = f"Dismount-DiskImage -ImagePath {escaped} -ErrorAction Stop"
         self.run_powershell(script)
+
+
+def create_dynamic_vhdx_diskpart_safe(
+    vhd_path: str,
+    volume_label: str,
+    max_size_gb: int,
+    mount_folder: str,
+    allowed_vhd_base: str = r"C:\LOCAL_VHD",
+    allowed_mount_base: str = r"C:\DEV\vhd_mounts",
+) -> Tuple[bool, str]:
+    try:
+        vhd = Path(vhd_path).resolve()
+        mount = Path(mount_folder).resolve()
+        vhd_base = Path(allowed_vhd_base).resolve()
+        mount_base = Path(allowed_mount_base).resolve()
+
+        if vhd.suffix.lower() != ".vhdx":
+            return False, "The target file must have a .vhdx extension."
+
+        if max_size_gb <= 0:
+            return False, "max_size_gb must be greater than 0."
+
+        if max_size_gb > 1024:
+            return False, "max_size_gb is too large for this safety policy."
+
+        if not vhd_base.exists():
+            return False, f"Allowed VHD base folder does not exist: {vhd_base}"
+
+        if not mount_base.exists():
+            return False, f"Allowed mount base folder does not exist: {mount_base}"
+
+        if not vhd.parent.exists():
+            return False, f"Parent folder does not exist: {vhd.parent}"
+
+        if not mount.exists():
+            return False, f"Mount folder does not exist: {mount}"
+
+        try:
+            vhd.relative_to(vhd_base)
+        except ValueError:
+            return False, f"VHD path must be inside {vhd_base}"
+
+        try:
+            mount.relative_to(mount_base)
+        except ValueError:
+            return False, f"Mount folder must be inside {mount_base}"
+
+        if vhd.exists():
+            return False, f"Refusing to overwrite existing file: {vhd}"
+
+        if any(mount.iterdir()):
+            return False, f"Mount folder must be empty: {mount}"
+
+        safe_label = volume_label.strip()
+        if not safe_label:
+            return False, "volume_label must not be empty."
+
+        if len(safe_label) > 32:
+            return False, "volume_label must be 32 characters or fewer."
+
+        if '"' in safe_label:
+            return False, 'volume_label must not contain a double quote (").'
+
+        if not re.fullmatch(r"[A-Za-z0-9 _.-]+", safe_label):
+            return False, "volume_label contains unsupported characters."
+
+        max_size_mb = max_size_gb * 1024
+
+        create_script = "\n".join(
+            [
+                f'create vdisk file="{vhd}" maximum={max_size_mb} type=expandable',
+                f'select vdisk file="{vhd}"',
+                'attach vdisk',
+                'create partition primary',
+                f'format fs=ntfs label="{safe_label}" quick',
+                f'assign mount="{mount}"',
+            ]
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            delete=False,
+            encoding="utf-8",
+            newline="\r\n",
+        ) as f:
+            script_path = Path(f.name)
+            f.write(create_script)
+            f.write("\n")
+
+        try:
+            result = subprocess.run(
+                ["diskpart", "/s", str(script_path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        finally:
+            script_path.unlink(missing_ok=True)
+
+        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+
+        if result.returncode != 0:
+            cleanup_script = "\n".join(
+                [
+                    f'select vdisk file="{vhd}"',
+                    'detach vdisk',
+                ]
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".txt",
+                delete=False,
+                encoding="utf-8",
+                newline="\r\n",
+            ) as f:
+                cleanup_path = Path(f.name)
+                f.write(cleanup_script)
+                f.write("\n")
+            try:
+                subprocess.run(
+                    ["diskpart", "/s", str(cleanup_path)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                )
+            finally:
+                cleanup_path.unlink(missing_ok=True)
+
+            return False, output or "DiskPart failed."
+
+        if not vhd.exists():
+            return False, "DiskPart reported success, but the VHDX file was not found afterward."
+
+        return True, f"Created VHDX successfully: {vhd}\nMounted at: {mount}"
+
+    except Exception as exc:
+        return False, str(exc)
 
 
 def ps_quote(value: str) -> str:
