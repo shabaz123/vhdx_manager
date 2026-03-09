@@ -8,7 +8,13 @@ Simply click the colored bullet alongside the desired VHD, to toggle between mou
 
 ![Banner screenshot](banner_screenshot.png)
 
-# Usage
+# Example Use-Cases
+
+You could use VHDX manager to create a virtual hard disk (VHD) for installing a single application inside it, and repeat this for all other applications if desired. Then, if you find you don't need any particular applications for a while, but wish to free up some space on your PC, you could simply unmount VHDs, and then move those VHD files off your PC to slower or cheaper storage (e.g. spinning disk rather than a solid-state drive), or even offload them to the cloud. This saves having to uninstall and reinstall apps, plus, it's more reliable to transfer and maintain VHD files rather than the hundreds or thousands of small files that could make up each application.
+
+The VHD files provide a lot of flexibility. If, say, you have a speedy USB 4 connection (for example, Thunderbolt-capable), then you could transfer the VHD to a fast USB drive, and directly mount it from there to a folder on your local PC, so that the application in effect is running from the external drive, again saving storage space on your PC. This could be useful if your PC's internal drive is getting full and you don't wish to replace it. 
+
+# Running VHDX Manager
 
 From PowerShell, go to the vhdx_manager folder, and type:
 ```
