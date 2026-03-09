@@ -19,6 +19,14 @@ POWERSHELL = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Co
 DEFAULT_VHD_BASE = Path("C:/LOCAL_VHD")
 DEFAULT_MOUNT_BASE = Path("C:/DEV/vhd_mounts")
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+def hidden_subprocess_kwargs() -> dict:
+    return {
+        "creationflags": CREATE_NO_WINDOW,
+        "startupinfo": None,
+    }
+
 COLORS = {
     "bg": "#0D1117",
     "panel": "#161B22",
@@ -51,6 +59,8 @@ class VHDManagerApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
+        icon = tk.PhotoImage(file="vhdx_manager_icon.png")
+        self.iconphoto(True, icon)
         self.geometry("980x640")
         self.minsize(760, 420)
         self.configure(bg=COLORS["bg"])
@@ -648,6 +658,7 @@ class VHDManagerApp(tk.Tk):
             encoding="utf-8",
             errors="replace",
             shell=False,
+            **hidden_subprocess_kwargs(),
         )
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()

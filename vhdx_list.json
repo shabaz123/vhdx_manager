@@ -1,17 +1,2 @@
 [
-  {
-    "vhd_path": "C:\\LOCAL_VHD\\arduino.vhdx",
-    "vhd_volume_label": "ARDUINO_DEV",
-    "vhd_description": "Arduino IDE"
-  },
-  {
-    "vhd_path": "C:\\LOCAL_VHD\\clion.vhdx",
-    "vhd_volume_label": "CLION_DEV",
-    "vhd_description": "CLion C/C++ IDE"
-  },
-  {
-    "vhd_path": "C:\\LOCAL_VHD\\vscode.vhdx",
-    "vhd_volume_label": "VSCODE_DEV",
-    "vhd_description": "VS Code Editor"
-  }
 ]
