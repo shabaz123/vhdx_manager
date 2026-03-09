@@ -16,6 +16,11 @@ The VHD files provide a lot of flexibility. If, say, you have a speedy USB 4 con
 
 # Running VHDX Manager
 
+If you have **git* installed on your Windows PC, then create a folder such as C:\DEV\projects, open a PowerShell window, navigate to that folder, then type the following to download the entire application source to the PC:
+```
+git clone https://github.com/shabaz123/vhdx_manager.git
+```
+
 From PowerShell, go to the vhdx_manager folder, and type:
 ```
 python .\vhdx_manager.py
