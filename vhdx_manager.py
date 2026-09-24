@@ -13,8 +13,16 @@ from tkinter import messagebox
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def get_app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent.resolve()
+    return Path(__file__).parent.resolve()
+
+
+APP_DIR = get_app_dir()
 APP_TITLE = "VHDX Manager"
-JSON_FILE = "vhdx_list.json"
+JSON_PATH = APP_DIR / "vhdx_list.json"
+ICON_PATH = APP_DIR / "vhdx_manager_icon.png"
 POWERSHELL = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 DEFAULT_VHD_BASE = Path("C:/LOCAL_VHD")
 DEFAULT_MOUNT_BASE = Path("C:/DEV/vhd_mounts")
@@ -59,8 +67,9 @@ class VHDManagerApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        icon = tk.PhotoImage(file="vhdx_manager_icon.png")
-        self.iconphoto(True, icon)
+        if ICON_PATH.exists():
+            icon = tk.PhotoImage(file=str(ICON_PATH))
+            self.iconphoto(True, icon)
         self.geometry("980x640")
         self.minsize(760, 420)
         self.configure(bg=COLORS["bg"])
@@ -215,15 +224,14 @@ class VHDManagerApp(tk.Tk):
         self.debug_var.set(message)
 
     def load_entries(self) -> List[VHDEntry]:
-        json_path = Path(JSON_FILE)
-        if not json_path.exists():
-            raise FileNotFoundError(f"{JSON_FILE} was not found next to the application.")
+        if not JSON_PATH.exists():
+            raise FileNotFoundError(f"{JSON_PATH.name} was not found next to the application ({JSON_PATH}).")
 
-        with json_path.open("r", encoding="utf-8") as f:
+        with JSON_PATH.open("r", encoding="utf-8") as f:
             raw = json.load(f)
 
         if not isinstance(raw, list):
-            raise ValueError(f"{JSON_FILE} must contain a JSON array.")
+            raise ValueError(f"{JSON_PATH.name} must contain a JSON array.")
 
         entries: List[VHDEntry] = []
         for i, item in enumerate(raw, start=1):
@@ -560,18 +568,17 @@ class VHDManagerApp(tk.Tk):
         if not title_text:
             return False, "Error, Title must not be empty"
 
-        json_path = Path(JSON_FILE)
-        if not json_path.exists():
-            return False, f"{JSON_FILE} was not found next to the application."
+        if not JSON_PATH.exists():
+            return False, f"{JSON_PATH.name} was not found next to the application ({JSON_PATH})."
 
         try:
-            with json_path.open("r", encoding="utf-8") as f:
+            with JSON_PATH.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
         except Exception as exc:
             return False, str(exc)
 
         if not isinstance(raw, list):
-            return False, f"{JSON_FILE} must contain a JSON array."
+            return False, f"{JSON_PATH.name} must contain a JSON array."
 
         normalized_vhd_path = os.path.normcase(vhd_path)
         normalized_volume_label = volume_label.strip().lower()
@@ -582,20 +589,19 @@ class VHDManagerApp(tk.Tk):
             existing_path = os.path.normcase(str(item.get("vhd_path", "")).strip())
             existing_label = str(item.get("vhd_volume_label", "")).strip().lower()
             if existing_path == normalized_vhd_path:
-                return False, f"An entry for this VHDX path already exists in {JSON_FILE}."
+                return False, f"An entry for this VHDX path already exists in {JSON_PATH.name}."
             if existing_label == normalized_volume_label:
-                return False, f"An entry for this volume label already exists in {JSON_FILE}."
+                return False, f"An entry for this volume label already exists in {JSON_PATH.name}."
 
         return True, "OK"
 
     def append_entry_to_json(self, title_text: str, vhd_path: str, volume_label: str) -> Tuple[bool, str]:
         try:
-            json_path = Path(JSON_FILE)
-            with json_path.open("r", encoding="utf-8") as f:
+            with JSON_PATH.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
 
             if not isinstance(raw, list):
-                return False, f"{JSON_FILE} must contain a JSON array."
+                return False, f"{JSON_PATH.name} must contain a JSON array."
 
             raw.append(
                 {
@@ -605,7 +611,7 @@ class VHDManagerApp(tk.Tk):
                 }
             )
 
-            with json_path.open("w", encoding="utf-8") as f:
+            with JSON_PATH.open("w", encoding="utf-8") as f:
                 json.dump(raw, f, indent=2)
                 f.write("\n")
 
@@ -756,14 +762,50 @@ $result | ConvertTo-Json -Depth 4
         return {"state": "Unmounted", "detail": "VHDX file exists and is not currently mounted."}
 
     def attach_vhd(self, vhd_path: str) -> None:
-        escaped = ps_quote(vhd_path)
-        script = f"Mount-DiskImage -ImagePath {escaped} -ErrorAction Stop"
-        self.run_powershell(script)
+        resolved = str(Path(vhd_path).resolve())
+        script = f'select vdisk file="{resolved}"\nattach vdisk'
+        success, output = run_diskpart(script)
+        if not success:
+            if "already attached" in output.lower():
+                return
+            raise RuntimeError(f"Failed to attach {Path(vhd_path).name}:\n{output}")
 
     def detach_vhd(self, vhd_path: str) -> None:
-        escaped = ps_quote(vhd_path)
-        script = f"Dismount-DiskImage -ImagePath {escaped} -ErrorAction Stop"
-        self.run_powershell(script)
+        resolved = str(Path(vhd_path).resolve())
+        script = f'select vdisk file="{resolved}"\ndetach vdisk'
+        success, output = run_diskpart(script)
+        if not success:
+            if "not attached" in output.lower() or "not open" in output.lower():
+                return
+            raise RuntimeError(f"Failed to detach {Path(vhd_path).name}:\n{output}")
+
+
+def run_diskpart(script_content: str) -> Tuple[bool, str]:
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".txt",
+        delete=False,
+        encoding="utf-8",
+        newline="\r\n",
+    ) as f:
+        script_path = Path(f.name)
+        f.write(script_content)
+        f.write("\n")
+
+    try:
+        result = subprocess.run(
+            ["diskpart", "/s", str(script_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            **hidden_subprocess_kwargs(),
+        )
+        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        return result.returncode == 0, output
+    finally:
+        script_path.unlink(missing_ok=True)
 
 
 def create_dynamic_vhdx_diskpart_safe(
@@ -843,60 +885,10 @@ def create_dynamic_vhdx_diskpart_safe(
             ]
         )
 
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".txt",
-            delete=False,
-            encoding="utf-8",
-            newline="\r\n",
-        ) as f:
-            script_path = Path(f.name)
-            f.write(create_script)
-            f.write("\n")
-
-        try:
-            result = subprocess.run(
-                ["diskpart", "/s", str(script_path)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-        finally:
-            script_path.unlink(missing_ok=True)
-
-        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
-
-        if result.returncode != 0:
-            cleanup_script = "\n".join(
-                [
-                    f'select vdisk file="{vhd}"',
-                    'detach vdisk',
-                ]
-            )
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".txt",
-                delete=False,
-                encoding="utf-8",
-                newline="\r\n",
-            ) as f:
-                cleanup_path = Path(f.name)
-                f.write(cleanup_script)
-                f.write("\n")
-            try:
-                subprocess.run(
-                    ["diskpart", "/s", str(cleanup_path)],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    check=False,
-                )
-            finally:
-                cleanup_path.unlink(missing_ok=True)
-
+        success, output = run_diskpart(create_script)
+        if not success:
+            cleanup_script = f'select vdisk file="{vhd}"\ndetach vdisk'
+            run_diskpart(cleanup_script)
             return False, output or "DiskPart failed."
 
         if not vhd.exists():
@@ -914,16 +906,23 @@ def ps_quote(value: str) -> str:
 
 def ensure_admin() -> None:
     if not ctypes.windll.shell32.IsUserAnAdmin():
-        argv = subprocess.list2cmdline(sys.argv)
-        ctypes.windll.shell32.ShellExecuteW(
+        app_dir = get_app_dir()
+        if getattr(sys, "frozen", False):
+            target_exe = sys.executable
+            params = subprocess.list2cmdline(sys.argv[1:])
+        else:
+            target_exe = sys.executable
+            params = subprocess.list2cmdline([str(Path(__file__).resolve())] + sys.argv[1:])
+
+        res = ctypes.windll.shell32.ShellExecuteW(
             None,
             "runas",
-            sys.executable,
-            argv,
-            None,
+            target_exe,
+            params,
+            str(app_dir),
             1,
         )
-        sys.exit()
+        sys.exit(0 if res > 32 else 1)
 
 
 def main() -> None:

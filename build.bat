@@ -5,15 +5,16 @@ echo ==============================
 echo Building vhdx_manager.exe
 echo ==============================
 
-REM Clean previous builds
+REM Clean previous build artifacts
 if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
 del /q *.spec 2>nul
+if not exist dist mkdir dist
 
-REM Build executable
+REM Build executable with UAC elevation requested in manifest
 pyinstaller ^
   --onefile ^
   --windowed ^
+  --uac-admin ^
   --icon vhdx_manager.ico ^
   --manifest admin.manifest ^
   --name vhdx_manager ^
@@ -22,8 +23,10 @@ pyinstaller ^
 echo.
 echo Copying resource files...
 
-copy vhdx_manager_icon.png dist\
-copy vhdx_list.json dist\
+copy /y vhdx_manager_icon.png dist\
+if not exist dist\vhdx_list.json (
+  copy /y vhdx_list.json dist\
+)
 
 echo.
 echo ==============================
